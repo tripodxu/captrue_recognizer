@@ -10,68 +10,22 @@
 """
 import json, math, os, sys, time, argparse
 import cv2
-import numpy as np
 from tqdm import tqdm
 
-# 项目根目录
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import benchmark.npc_baseline as npc
+import benchmark.algorithms as algo
 
-
-# ============================================================================
-#  Optimized v4f 检测 (独立函数版，用于批量测试)
-# ============================================================================
-
-def detect_optimized(background, puzzle):
-    """优化算法 v5: 多阈值 Canny + NPC 置信度择优，无 SSD。"""
-    bg = cv2.normalize(background, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-    pz = cv2.normalize(puzzle, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-    bg_g = cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY)
-    pz_g = cv2.cvtColor(pz, cv2.COLOR_BGR2GRAY)
-
-    # 多阈值 Canny
-    bv, bl = -1.0, (0, 0)
-    for lo, hi in [(30, 100), (50, 150), (80, 180), (100, 200),
-                   (120, 240), (150, 250), (180, 300)]:
-        be = cv2.Canny(bg_g, lo, hi)
-        pe = cv2.Canny(pz_g, lo, hi)
-        r = cv2.matchTemplate(be, pe, cv2.TM_CCOEFF_NORMED)
-        _, mv, _, ml = cv2.minMaxLoc(r)
-        if mv > bv:
-            bv, bl = mv, ml
-    xm, ym = bl
-    cm = max(0.0, min(1.0, bv))
-
-    # NPC 一致性校验
-    bn = cv2.Canny(bg_g, 150, 250)
-    pn = cv2.Canny(pz_g, 150, 250)
-    nr = cv2.matchTemplate(bn, pn, cv2.TM_CCOEFF_NORMED)
-    npc_val, _, _, nl = cv2.minMaxLoc(nr)
-    cn = max(0.0, min(1.0, npc_val))
-
-    if cm >= 0.35 or abs(xm - nl[0]) <= 5:
-        return xm, ym
-
-    # 置信度择优
-    if cn > cm:
-        return nl[0], nl[1]
-    return xm, ym
-
-
-# ============================================================================
-#  测试框架
-# ============================================================================
 
 def run_single(method_name, method_fn, dataset_dir, cases, tolerance):
     """运行单个方法，带 tqdm 进度条。"""
     ok = fail = 0
     total_time = 0.0
-    desc = f"    {method_name:<20}"
 
-    for c in tqdm(cases, desc=desc, ncols=90, leave=False,
-                  bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"):
+    for c in tqdm(cases, desc=f"    {method_name:<20}", ncols=90, leave=False,
+                  bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} "
+                             "[{elapsed}<{remaining}, {rate_fmt}]"):
         bg = cv2.imread(os.path.join(dataset_dir, c["background"]))
         pz = cv2.imread(os.path.join(dataset_dir, c["puzzle"]))
         if bg is None or pz is None:
@@ -107,17 +61,18 @@ def main():
 
     tests_dir = os.path.join(ROOT, "tests")
     methods = [
-        ("NPC Baseline", npc.detect),
-        ("Optimized v4f", detect_optimized),
+        ("NPC Baseline", algo.detect_npc),
+        ("Optimized v5", algo.detect_v5),
     ]
 
-    # 发现数据集
     if args.dataset:
         datasets = [args.dataset]
     else:
-        datasets = sorted([d for d in os.listdir(tests_dir)
-                           if os.path.isdir(os.path.join(tests_dir, d))
-                           and os.path.exists(os.path.join(tests_dir, d, "dataset.json"))])
+        datasets = sorted(
+            d for d in os.listdir(tests_dir)
+            if os.path.isdir(os.path.join(tests_dir, d))
+            and os.path.exists(os.path.join(tests_dir, d, "dataset.json"))
+        )
 
     totals = {m[0]: {"ok": 0, "total": 0, "time": 0} for m in methods}
 
@@ -132,7 +87,8 @@ def main():
         if not os.path.exists(json_path):
             continue
 
-        ds = json.load(open(json_path, encoding="utf-8"))
+        with open(json_path, encoding="utf-8") as f:
+            ds = json.load(f)
         tol = args.tolerance or ds.get("error_tolerance", 5)
         cases = ds["cases"][:args.max_cases] if args.max_cases else ds["cases"]
         n = len(cases)
@@ -149,14 +105,12 @@ def main():
             tqdm.write(f"  {m_name:<20} {r['acc']:>9.1%} {r['ok']:>6} {r['fail']:>5} "
                        f"{r['time']:>7.1f}s {r['speed']:>8.1f} i/s")
 
-    # 总汇
     print("\n" + "=" * 75)
     print("TOTALS")
     print("=" * 75)
     print(f"  {'Method':<20} {'Accuracy':>10} {'Cases':>12} {'Time':>8} {'Speed':>10}")
     print(f"  {'-' * 65}")
-    for m_name in totals:
-        t = totals[m_name]
+    for m_name, t in totals.items():
         acc = t["ok"] / t["total"] if t["total"] else 0
         spd = t["total"] / t["time"] if t["time"] else 0
         print(f"  {m_name:<20} {acc:>9.1%} {t['ok']:>5}/{t['total']:<5} "

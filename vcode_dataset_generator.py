@@ -7,10 +7,9 @@ vue-puzzle-vcode 风格的拼图验证码批量生成器。
 
 生成的格式与 No-Puzzle-Captcha 测试集兼容 (dataset.json + 背景图 + 拼图切片图)。
 """
-import json, os, math, random, argparse, glob
+import json, os, math, random, argparse
 import cv2
 import numpy as np
-from pathlib import Path
 from tqdm import tqdm
 
 

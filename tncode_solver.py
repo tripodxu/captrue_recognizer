@@ -31,10 +31,19 @@ import time
 import random
 import base64
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict
 
 import cv2
 import numpy as np
+
+# 检测算法常量 (与 benchmark/algorithms.py 保持一致)
+_CANNY_THRESHOLDS = [
+    (30, 100), (50, 150), (80, 180), (100, 200),
+    (120, 240), (150, 250), (180, 300),
+]
+_NPC_LOW, _NPC_HIGH = 150, 250
+_CONFIDENCE_THRESHOLD = 0.35
+_AGREEMENT_TOLERANCE = 5
 
 
 # ---------------------------------------------------------------------------
@@ -142,10 +151,10 @@ class TncodeSolver:
         mark_s = cv2.resize(cv2.cvtColor(mark_img, cv2.COLOR_BGR2GRAY), (16, 8))
         combined = np.vstack([bg_s, mark_s])
         avg = combined.mean()
+        bits_array = (combined > avg).flatten().astype(np.uint8)
         bits = 0
-        for row in combined:
-            for px in row:
-                bits = (bits << 1) | (1 if px > avg else 0)
+        for b in bits_array:
+            bits = (bits << 1) | int(b)
         return format(bits, f"0{(combined.size + 3) // 4}x")
 
     def _fuzzy_lookup(self, target_hash: str, max_distance=5) -> Optional[int]:
@@ -174,9 +183,6 @@ class TncodeSolver:
     #  CV 检测 (v5: 多阈值 Canny + NPC 置信度择优)
     # ------------------------------------------------------------------
 
-    _CANNY_THRESHOLDS = [(30, 100), (50, 150), (80, 180), (100, 200),
-                         (120, 240), (150, 250), (180, 300)]
-
     def _detect_cv(self, bg_img, mark_img) -> Tuple[Optional[int], float]:
         """
         v5 CV 检测 — 多阈值 Canny + NPC 置信度择优，无 SSD。
@@ -201,7 +207,7 @@ class TncodeSolver:
             # 多阈值 Canny
             best_val = -1.0
             best_x = 0
-            for lo, hi in self._CANNY_THRESHOLDS:
+            for lo, hi in _CANNY_THRESHOLDS:
                 bg_e = cv2.Canny(bg_gray, lo, hi)
                 pz_e = cv2.Canny(pz_gray, lo, hi)
                 result = cv2.matchTemplate(bg_e, pz_e, cv2.TM_CCOEFF_NORMED)
@@ -211,28 +217,23 @@ class TncodeSolver:
                     best_x = max_loc[0]
 
             # NPC 一致性校验
-            bg_npc = cv2.Canny(bg_gray, 150, 250)
-            pz_npc = cv2.Canny(pz_gray, 150, 250)
+            bg_npc = cv2.Canny(bg_gray, _NPC_LOW, _NPC_HIGH)
+            pz_npc = cv2.Canny(pz_gray, _NPC_LOW, _NPC_HIGH)
             npc_result = cv2.matchTemplate(bg_npc, pz_npc, cv2.TM_CCOEFF_NORMED)
             npc_val, _, _, npc_loc = cv2.minMaxLoc(npc_result)
 
             mc_conf = max(0.0, min(1.0, best_val))
             npc_conf = max(0.0, min(1.0, npc_val))
 
-            if mc_conf >= 0.35 or abs(best_x - npc_loc[0]) <= 5:
-                print(f"    [CV-multi] x={best_x} conf={mc_conf:.3f}")
+            if mc_conf >= _CONFIDENCE_THRESHOLD or abs(best_x - npc_loc[0]) <= _AGREEMENT_TOLERANCE:
                 return best_x, mc_conf
 
-            # 置信度择优
             if npc_conf > mc_conf:
-                print(f"    [CV-npc] x={npc_loc[0]} conf={npc_conf:.3f} (mc_conf={mc_conf:.3f})")
                 return npc_loc[0], npc_conf
 
-            print(f"    [CV-multi] x={best_x} conf={mc_conf:.3f}")
             return best_x, mc_conf
 
-        except Exception as e:
-            print(f"    [CV error] {e}")
+        except Exception:
             return None, 0
 
     # ------------------------------------------------------------------
@@ -602,7 +603,7 @@ class TncodeSolver:
                 self._refresh()
                 continue
 
-            h = self._combo_hash(bg, mark) if mark is not None else ""
+            h = self._combo_hash(bg, mark)
 
             # 卡住检测
             if h and h == last_h:
