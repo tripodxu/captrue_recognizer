@@ -2,9 +2,11 @@
 """
 核心检测算法 — 供 benchmark 脚本和 tncode_solver.py 共用。
 包含 NPC Baseline、v4f 和 v5 的纯函数实现。
+支持多线程加速和 GPU 加速。
 """
 import cv2
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 
 
 # 常量
@@ -36,6 +38,76 @@ def _multi_canny_match(bg_gray, pz_gray):
         if max_val > best_val:
             best_val, best_loc = max_val, max_loc
     return best_loc[0], best_loc[1], max(0.0, min(1.0, best_val))
+
+
+def _canny_match_one(args):
+    """单组阈值的 Canny + matchTemplate，供线程池调用。OpenCV C++ 释放 GIL。"""
+    lo, hi, bg_gray, pz_gray = args
+    bg_e = cv2.Canny(bg_gray, lo, hi)
+    pz_e = cv2.Canny(pz_gray, lo, hi)
+    result = cv2.matchTemplate(bg_e, pz_e, cv2.TM_CCOEFF_NORMED)
+    _, max_val, _, max_loc = cv2.minMaxLoc(result)
+    return max_val, max_loc
+
+
+def _multi_canny_match_mt(bg_gray, pz_gray, max_workers=7):
+    """多阈值 Canny 模板匹配（多线程版），返回 (x, y, confidence)。"""
+    tasks = [(lo, hi, bg_gray, pz_gray) for lo, hi in CANNY_THRESHOLDS]
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        results = list(ex.map(_canny_match_one, tasks))
+    best_val, best_loc = max(results, key=lambda r: r[0])
+    return best_loc[0], best_loc[1], max(0.0, min(1.0, best_val))
+
+
+# --- GPU 加速版 ---
+
+def _has_gpu():
+    """检测是否有可用的 GPU 加速后端。"""
+    try:
+        # 检查 OpenCL 支持
+        if cv2.ocl.haveOpenCL():
+            cv2.ocl.setUseOpenCL(True)
+            return True
+    except Exception:
+        pass
+    try:
+        # 检查 CUDA 支持
+        cv2.cuda.getCudaEnabledDeviceCount()
+        return True
+    except Exception:
+        pass
+    return False
+
+
+def _preprocess_gpu(background, puzzle):
+    """归一化 + 灰度转换（GPU 版，使用 UMat）。"""
+    bg = cv2.normalize(background, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    pz = cv2.normalize(puzzle, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    bg_umat = cv2.UMat(cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY))
+    pz_umat = cv2.UMat(cv2.cvtColor(pz, cv2.COLOR_BGR2GRAY))
+    return bg_umat, pz_umat
+
+
+def _multi_canny_match_gpu(bg_umat, pz_umat):
+    """多阈值 Canny 模板匹配（GPU 版，使用 UMat），返回 (x, y, confidence)。"""
+    best_val, best_loc = -1.0, (0, 0)
+    for lo, hi in CANNY_THRESHOLDS:
+        bg_e = cv2.Canny(bg_umat, lo, hi)
+        pz_e = cv2.Canny(pz_umat, lo, hi)
+        result = cv2.matchTemplate(bg_e, pz_e, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+        if max_val > best_val:
+            best_val, best_loc = max_val, max_loc
+    return best_loc[0], best_loc[1], max(0.0, min(1.0, best_val))
+
+
+def _npc_match_gpu(bg_umat, pz_umat):
+    """NPC 单阈值匹配（GPU 版），返回 (x, y, confidence)。"""
+    bg_e = cv2.Canny(bg_umat, NPC_LOW, NPC_HIGH)
+    pz_e = cv2.Canny(pz_umat, NPC_LOW, NPC_HIGH)
+    result = cv2.matchTemplate(bg_e, pz_e, cv2.TM_CCOEFF_NORMED)
+    max_val, _, _, max_loc = cv2.minMaxLoc(result)
+    return max_loc[0], max_loc[1], max(0.0, min(1.0, max_val))
 
 
 def _npc_match(bg_gray, pz_gray):
@@ -126,3 +198,59 @@ def detect_v5(background, puzzle):
     if nc > mc:
         return nx, ny
     return mx, my
+
+
+# --- 加速版 detect 函数 ---
+
+def detect_v5_mt(background, puzzle, canny_workers=7):
+    """
+    v5 多线程加速版：多阈值 Canny 用线程池并行。
+    返回 (x, y)。
+    """
+    bg_gray, pz_gray = _preprocess(background, puzzle)
+    mx, my, mc = _multi_canny_match_mt(bg_gray, pz_gray, max_workers=canny_workers)
+    nx, ny, nc = _npc_match(bg_gray, pz_gray)
+
+    if mc >= CONFIDENCE_THRESHOLD or abs(mx - nx) <= AGREEMENT_TOLERANCE:
+        return mx, my
+    if nc > mc:
+        return nx, ny
+    return mx, my
+
+
+def detect_v5_gpu(background, puzzle):
+    """
+    v5 GPU 加速版：使用 UMat 将 Canny/matchTemplate 卸载到 GPU。
+    返回 (x, y)。
+    """
+    bg_umat, pz_umat = _preprocess_gpu(background, puzzle)
+    mx, my, mc = _multi_canny_match_gpu(bg_umat, pz_umat)
+    nx, ny, nc = _npc_match_gpu(bg_umat, pz_umat)
+
+    if mc >= CONFIDENCE_THRESHOLD or abs(mx - nx) <= AGREEMENT_TOLERANCE:
+        return mx, my
+    if nc > mc:
+        return nx, ny
+    return mx, my
+
+
+def detect_npc_gpu(background, puzzle):
+    """NPC Baseline GPU 版。返回 (x, y)。"""
+    bg_umat, pz_umat = _preprocess_gpu(background, puzzle)
+    x, y, _ = _npc_match_gpu(bg_umat, pz_umat)
+    return x, y
+
+
+def detect_v4f_gpu(background, puzzle):
+    """v4f GPU 版（SSD 部分仍在 CPU）。返回 (x, y)。"""
+    bg_umat, pz_umat = _preprocess_gpu(background, puzzle)
+    mx, my, mc = _multi_canny_match_gpu(bg_umat, pz_umat)
+    nx, ny, nc = _npc_match_gpu(bg_umat, pz_umat)
+
+    if mc >= CONFIDENCE_THRESHOLD or abs(mx - nx) <= AGREEMENT_TOLERANCE:
+        return mx, my
+
+    # SSD 兜底（需要 numpy 数组，从 UMat 取回）
+    bg_gray = bg_umat.get() if hasattr(bg_umat, 'get') else bg_umat
+    pz_gray = pz_umat.get() if hasattr(pz_umat, 'get') else pz_umat
+    return _ssd_fallback(bg_gray, pz_gray, mx, my)

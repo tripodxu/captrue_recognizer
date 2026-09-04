@@ -162,9 +162,14 @@ if solver.solve():
 
 ```bash
 # 三模型对比测试
-python benchmark/run_test.py                                    # 全部数据集
+python benchmark/run_test.py                                    # 全部数据集 (默认 8 workers 并行)
 python benchmark/run_test.py --dataset geetest_test             # 指定
 python benchmark/run_test.py --dataset vcode_caltech_30k -m 500 # 快速验证
+
+# 并行加速
+python benchmark/run_test.py --workers 8                        # 指定并行数 (默认 min(cpu_count, 8))
+python benchmark/run_test.py --preload                          # 预加载图片到内存
+python benchmark/run_test.py --gpu                              # GPU 加速 (小图不推荐)
 
 # A/B 实验
 python benchmark/experiment.py --max-cases 200
@@ -172,6 +177,16 @@ python benchmark/experiment.py --max-cases 200
 # 生成数据集
 python vcode_dataset_generator.py -i <图片目录> -o tests/my_ds -c 5000
 ```
+
+### 测试加速
+
+默认使用多进程并行（8 workers），v5 在 5000 样例上从 51.9s → 15.7s（**3.3x 加速**），准确率不变。
+
+| Workers | 时间 | 速度 | 加速比 |
+|---------|------|------|--------|
+| 1 (串行) | 51.9s | 96 i/s | 1x |
+| **8 (默认)** | **15.7s** | **318 i/s** | **3.3x** |
+| 16 | 16.2s | 309 i/s | 3.2x |
 
 ---
 

@@ -141,9 +141,57 @@ v5 (MC+NPC 择优)     95.8%    38228/39890   425.8s     94 i/s
 
 ---
 
-## 6. 测试环境
+## 6. 测试加速
+
+### 6.1 加速方案
+
+| 优化 | 说明 |
+|------|------|
+| 多进程并行 | `ProcessPoolExecutor` 按样本批量分发，减少 IPC 开销 |
+| 线程池 Canny | 7 组 Canny 阈值用 `ThreadPoolExecutor` 并行（OpenCV C++ 释放 GIL） |
+| 图片预加载 | `--preload` 一次性读取所有图片到内存，减少磁盘 I/O |
+| GPU 加速 | `--gpu` 使用 `cv2.UMat` 透明 GPU 加速（需 OpenCL/CUDA） |
+
+### 6.2 加速效果 (vcode_caltech_5k, 5000 样例, v5)
+
+| Workers | 时间 | 速度 | 加速比 | 准确率 |
+|---------|------|------|--------|--------|
+| 1 (串行) | 51.9s | 96.3 i/s | 1x | 98.0% |
+| **8 (默认)** | **15.7s** | **318.2 i/s** | **3.3x** | **98.0%** |
+| 16 | 16.2s | 308.5 i/s | 3.2x | 98.0% |
+| 20 | 17.4s | 287.1 i/s | 2.9x | 98.0% |
+
+### 6.3 最优配置
+
+- **默认 workers = 8**（即使 CPU 有更多核，超过8后收益递减甚至下降）
+- 原因：进程池启动开销 + IPC 通信开销 + 内存带宽饱和 + OpenCV 内部线程 oversubscription
+- GPU 对小图（310x160）反而更慢，UMat 上传/下载开销 > 计算收益
+
+### 6.4 用法
+
+```bash
+# 默认并行 (自动检测 CPU 核数，上限 8)
+python benchmark/run_test.py
+
+# 指定 workers
+python benchmark/run_test.py --workers 4
+
+# 预加载图片 (HDD 场景有帮助)
+python benchmark/run_test.py --preload
+
+# GPU 加速 (小图不推荐)
+python benchmark/run_test.py --gpu
+
+# 组合使用
+python benchmark/run_test.py --workers 8 --preload
+```
+
+---
+
+## 7. 测试环境
 
 - OS: Windows 10 x64
+- CPU: 20 核
 - Python: 3.10.11
 - OpenCV: 5.0.0
 - NumPy: 2.2.6
