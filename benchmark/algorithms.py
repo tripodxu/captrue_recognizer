@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 核心检测算法 — 供 benchmark 脚本和 tncode_solver.py 共用。
-包含 NPC Baseline 和 Optimized v5 的纯函数实现。
+包含 NPC Baseline、v4f 和 v5 的纯函数实现。
 """
 import cv2
 import numpy as np
@@ -15,6 +15,7 @@ CANNY_THRESHOLDS = [
 NPC_LOW, NPC_HIGH = 150, 250
 CONFIDENCE_THRESHOLD = 0.35
 AGREEMENT_TOLERANCE = 5
+SSD_CONFIDENCE_THRESHOLD = 0.80
 
 
 def _preprocess(background, puzzle):
@@ -46,6 +47,33 @@ def _npc_match(bg_gray, pz_gray):
     return max_loc[0], max_loc[1], max(0.0, min(1.0, max_val))
 
 
+def _ssd_fallback(bg_gray, pz_gray, mc_x, mc_y):
+    """SSD 像素匹配兜底 (v4f 使用)。返回 (x, y)。"""
+    bg_f = bg_gray.astype(np.float64)
+    pz_f = pz_gray.astype(np.float64)
+    _, mask = cv2.threshold(pz_gray, 1, 255, cv2.THRESH_BINARY)
+    mb = mask > 0
+    ph, pw = pz_f.shape
+    bh, bw = bg_f.shape
+    if ph > bh or pw > bw:
+        return mc_x, mc_y
+    npx = int(np.sum(mb))
+    if npx == 0:
+        return mc_x, mc_y
+    be2, bx = 1e18, 0
+    for x in range(0, bw - pw + 1, 2):
+        err = float(np.sum(((bg_f[0:ph, x:x + pw] - pz_f) ** 2)[mb])) / npx
+        if err < be2:
+            be2, bx = err, x
+    for x in range(max(0, bx - 2), min(bw - pw + 1, bx + 3)):
+        err = float(np.sum(((bg_f[0:ph, x:x + pw] - pz_f) ** 2)[mb])) / npx
+        if err < be2:
+            be2, bx = err, x
+    if max(0.0, 1.0 - be2 / 10000.0) > SSD_CONFIDENCE_THRESHOLD:
+        return bx, mc_y
+    return mc_x, mc_y
+
+
 def detect_npc(background, puzzle):
     """
     NPC Baseline: Normalize → Canny(150,250) → matchTemplate(CCOEFF_NORMED)。
@@ -56,9 +84,31 @@ def detect_npc(background, puzzle):
     return x, y
 
 
+def detect_v4f(background, puzzle):
+    """
+    v4f: 多阈值 Canny + NPC 一致性校验 + SSD 像素匹配兜底。
+    1. 多阈值 Canny (7 组) 取最高 CCOEFF_NORMED → MC
+    2. NPC 单阈值 (150,250) → NPC
+    3. MC conf >= 0.35 或 |MC.x - NPC.x| <= 5 → MC
+    4. 否则 SSD 兜底 (conf > 0.80 时采纳)
+    5. 兜底返回 MC
+    返回 (x, y)。
+    """
+    bg_gray, pz_gray = _preprocess(background, puzzle)
+
+    mx, my, mc = _multi_canny_match(bg_gray, pz_gray)
+    nx, ny, nc = _npc_match(bg_gray, pz_gray)
+
+    if mc >= CONFIDENCE_THRESHOLD or abs(mx - nx) <= AGREEMENT_TOLERANCE:
+        return mx, my
+
+    # SSD 兜底
+    return _ssd_fallback(bg_gray, pz_gray, mx, my)
+
+
 def detect_v5(background, puzzle):
     """
-    Optimized v5: 多阈值 Canny + NPC 置信度择优。
+    v5: 多阈值 Canny + NPC 置信度择优 (无 SSD)。
     1. 多阈值 Canny (7 组) 取最高 CCOEFF_NORMED → MC
     2. NPC 单阈值 (150,250) → NPC
     3. MC conf >= 0.35 或 |MC.x - NPC.x| <= 5 → MC

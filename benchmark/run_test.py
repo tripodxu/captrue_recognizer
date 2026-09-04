@@ -62,6 +62,7 @@ def main():
     tests_dir = os.path.join(ROOT, "tests")
     methods = [
         ("NPC Baseline", algo.detect_npc),
+        ("Optimized v4f", algo.detect_v4f),
         ("Optimized v5", algo.detect_v5),
     ]
 
