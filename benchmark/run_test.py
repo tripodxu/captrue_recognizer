@@ -28,6 +28,7 @@ METHODS = {
     "NPC Baseline": algo.detect_npc,
     "Optimized v4f": algo.detect_v4f,
     "Optimized v5": algo.detect_v5,
+    "Optimized v6": algo.detect_v6,
     "NPC GPU": algo.detect_npc_gpu,
     "v4f GPU": algo.detect_v4f_gpu,
     "v5 GPU": algo.detect_v5_gpu,
@@ -246,12 +247,14 @@ def main():
                 ("NPC Baseline", algo.detect_npc),
                 ("Optimized v4f", algo.detect_v4f),
                 ("Optimized v5", algo.detect_v5),
+                ("Optimized v6", algo.detect_v6),
             ]
     else:
         methods = [
             ("NPC Baseline", algo.detect_npc),
             ("Optimized v4f", algo.detect_v4f),
             ("Optimized v5", algo.detect_v5),
+            ("Optimized v6", algo.detect_v6),
         ]
 
     print(f"[Config] workers={args.workers}, canny_workers={args.canny_workers}, "

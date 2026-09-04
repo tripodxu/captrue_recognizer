@@ -14,10 +14,15 @@ CANNY_THRESHOLDS = [
     (30, 100), (50, 150), (80, 180), (100, 200),
     (120, 240), (150, 250), (180, 300),
 ]
+CANNY_THRESHOLDS_V6 = [
+    (20, 80), (30, 100), (50, 150), (80, 180), (100, 200),
+    (120, 240), (150, 250), (180, 300), (200, 350),
+]
 NPC_LOW, NPC_HIGH = 150, 250
 CONFIDENCE_THRESHOLD = 0.35
 AGREEMENT_TOLERANCE = 5
 SSD_CONFIDENCE_THRESHOLD = 0.80
+CLAHE_CLIP_V6 = 8.0
 
 
 def _preprocess(background, puzzle):
@@ -27,10 +32,24 @@ def _preprocess(background, puzzle):
     return cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY), cv2.cvtColor(pz, cv2.COLOR_BGR2GRAY)
 
 
-def _multi_canny_match(bg_gray, pz_gray):
+def _preprocess_clahe(background, puzzle, clip=CLAHE_CLIP_V6):
+    """归一化 + CLAHE 自适应直方图均衡化 + 灰度转换。"""
+    bg = cv2.normalize(background, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    pz = cv2.normalize(puzzle, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    bg_gray = cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY)
+    pz_gray = cv2.cvtColor(pz, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=clip, tileGridSize=(8, 8))
+    bg_gray = clahe.apply(bg_gray)
+    pz_gray = clahe.apply(pz_gray)
+    return bg_gray, pz_gray
+
+
+def _multi_canny_match(bg_gray, pz_gray, thresholds=None):
     """多阈值 Canny 模板匹配，返回 (x, y, confidence)。"""
+    if thresholds is None:
+        thresholds = CANNY_THRESHOLDS
     best_val, best_loc = -1.0, (0, 0)
-    for lo, hi in CANNY_THRESHOLDS:
+    for lo, hi in thresholds:
         bg_e = cv2.Canny(bg_gray, lo, hi)
         pz_e = cv2.Canny(pz_gray, lo, hi)
         result = cv2.matchTemplate(bg_e, pz_e, cv2.TM_CCOEFF_NORMED)
@@ -190,6 +209,45 @@ def detect_v5(background, puzzle):
     bg_gray, pz_gray = _preprocess(background, puzzle)
 
     mx, my, mc = _multi_canny_match(bg_gray, pz_gray)
+    nx, ny, nc = _npc_match(bg_gray, pz_gray)
+
+    if mc >= CONFIDENCE_THRESHOLD or abs(mx - nx) <= AGREEMENT_TOLERANCE:
+        return mx, my
+
+    if nc > mc:
+        return nx, ny
+    return mx, my
+
+
+def detect_v5_clahe(background, puzzle):
+    """
+    v5 + CLAHE 预处理：自适应直方图均衡化增强暗背景。
+    返回 (x, y)。
+    """
+    bg_gray, pz_gray = _preprocess_clahe(background, puzzle)
+
+    mx, my, mc = _multi_canny_match(bg_gray, pz_gray)
+    nx, ny, nc = _npc_match(bg_gray, pz_gray)
+
+    if mc >= CONFIDENCE_THRESHOLD or abs(mx - nx) <= AGREEMENT_TOLERANCE:
+        return mx, my
+
+    if nc > mc:
+        return nx, ny
+    return mx, my
+
+
+def detect_v6(background, puzzle):
+    """
+    v6: CLAHE(8.0) + 扩展9组Canny阈值 + NPC 置信度择优。
+    改进点:
+    1. CLAHE clipLimit=8.0 增强局部对比度（改善暗背景）
+    2. 9组阈值覆盖更广的边缘条件
+    返回 (x, y)。
+    """
+    bg_gray, pz_gray = _preprocess_clahe(background, puzzle)
+
+    mx, my, mc = _multi_canny_match(bg_gray, pz_gray, thresholds=CANNY_THRESHOLDS_V6)
     nx, ny, nc = _npc_match(bg_gray, pz_gray)
 
     if mc >= CONFIDENCE_THRESHOLD or abs(mx - nx) <= AGREEMENT_TOLERANCE:
