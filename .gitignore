@@ -1,0 +1,34 @@
+# Test datasets (too large, not pushed)
+tests/
+caltech256_images/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# Virtual environments
+venv/
+venv2/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Old/unused directories
+No-Puzzle-Captcha/
+vue-puzzle-vcode/
+.mimocode/
+
+# Archives
+*.rar
+*.zip
+*.tar
+
+# Data files
+data.json
+*.json.bak
