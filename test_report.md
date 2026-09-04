@@ -91,19 +91,19 @@ moveL = ceil(15 * puzzleScale)   # 默认 puzzleScale=1, moveL=15
 
 | 数据集 | 样例 | 容差 | NPC | v4f | v5 | v6 | 来源 |
 |--------|------|------|-----|-----|-----|-----|------|
-| GeeTest | 115 | 5 | 90.4% | 91.3% | 91.3% | - | [NPC](https://github.com/isHarryh/No-Puzzle-Captcha) |
-| Tricky | 100 | 5 | 99.0% | 99.0% | 99.0% | - | [NPC](https://github.com/isHarryh/No-Puzzle-Captcha) |
-| Tricky Hard | 190 | 5 | 90.5% | 98.9% | 98.4% | - | [NPC](https://github.com/isHarryh/No-Puzzle-Captcha) |
-| Syn Easy | 200 | 5 | 96.5% | 98.0% | 100.0% | - | 自生成 |
-| Syn Medium | 200 | 5 | 75.5% | 97.0% | 99.5% | - | 自生成 |
-| Syn Hard | 200 | 5 | 45.5% | 87.0% | 100.0% | - | 自生成 |
-| Slider Easy | 200 | 5 | 91.5% | 96.5% | 99.0% | - | 自生成 |
-| Slider Hard | 200 | 5 | 42.0% | 99.0% | 100.0% | - | 自生成 |
+| GeeTest | 115 | 5 | 90.4% | 91.3% | 91.3% | 86.1% | [NPC](https://github.com/isHarryh/No-Puzzle-Captcha) |
+| Tricky | 100 | 5 | 99.0% | 99.0% | 99.0% | 88.0% | [NPC](https://github.com/isHarryh/No-Puzzle-Captcha) |
+| Tricky Hard | 190 | 5 | 90.5% | 98.9% | 98.4% | 97.9% | [NPC](https://github.com/isHarryh/No-Puzzle-Captcha) |
+| Syn Easy | 200 | 5 | 96.5% | 98.0% | 100.0% | 100.0% | 自生成 |
+| Syn Medium | 200 | 5 | 75.5% | 97.0% | 99.5% | 100.0% | 自生成 |
+| Syn Hard | 200 | 5 | 45.5% | 87.0% | 100.0% | 100.0% | 自生成 |
+| Slider Easy | 200 | 5 | 91.5% | 96.5% | 99.0% | 100.0% | 自生成 |
+| Slider Hard | 200 | 5 | 42.0% | 99.0% | 100.0% | 100.0% | 自生成 |
 | Caltech-256 5K | 5000 | 10 | 77.6% | 96.5% | 98.0% | **99.7%** | [Caltech-256](https://data.caltech.edu/records/nyg2z-78ja1) |
 | Caltech-256 30K | 30607 | 10 | 76.9% | 96.1% | 97.7% | **99.7%** | [Caltech-256](https://data.caltech.edu/records/nyg2z-78ja1) |
 | Balanced 50/50 | 2878 | 5 | 41.0% | 49.9% | 71.2% | **97.0%** | 压力测试集 |
 
-> v6 数据仅覆盖 Caltech-256 和 Balanced 数据集（共 38,485 样例）。
+> v6 在 GeeTest (-5.2pp) 和 Tricky (-11.0pp) 上有回归，CLAHE(8.0) 对这类真实验证码过于激进。
 
 ### 3.2 总计
 
