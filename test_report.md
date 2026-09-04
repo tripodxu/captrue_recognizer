@@ -11,7 +11,7 @@
 | 来源 | 样例数 | 说明 |
 |------|--------|------|
 | NPC 原始数据集 | 405 | [No-Puzzle-Captcha](https://github.com/isHarryh/No-Puzzle-Captcha) 3 组 |
-| 合成数据集 | 1000 | `gen_v2.py` 生成，5 种难度/类型 |
+| 合成数据集 | 1000 | 5 种难度/类型，形状+噪声渐进变化 |
 | Caltech-256 vcode | 35607 | 30607 + 5000，Caltech-256 + jigsaw 拼图 |
 | Balanced 50/50 | 2878 | v4f 失败/成功 1:1 平衡数据集 |
 
