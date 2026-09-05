@@ -30,6 +30,7 @@ METHODS = {
     "Optimized v5": algo.detect_v5,
     "Optimized v6": algo.detect_v6,
     "Optimized v6b": algo.detect_v6b,
+    "Optimized v7": algo.detect_v7,
     "NPC GPU": algo.detect_npc_gpu,
     "v4f GPU": algo.detect_v4f_gpu,
     "v5 GPU": algo.detect_v5_gpu,
@@ -249,7 +250,7 @@ def main():
                 ("Optimized v4f", algo.detect_v4f),
                 ("Optimized v5", algo.detect_v5),
                 ("Optimized v6", algo.detect_v6),
-                ("Optimized v6b", algo.detect_v6b),
+                ("Optimized v7", algo.detect_v7),
             ]
     else:
         methods = [
@@ -257,7 +258,7 @@ def main():
             ("Optimized v4f", algo.detect_v4f),
             ("Optimized v5", algo.detect_v5),
             ("Optimized v6", algo.detect_v6),
-            ("Optimized v6b", algo.detect_v6b),
+            ("Optimized v7", algo.detect_v7),
         ]
 
     print(f"[Config] workers={args.workers}, canny_workers={args.canny_workers}, "

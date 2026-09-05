@@ -296,6 +296,52 @@ def detect_v6b(background, puzzle):
     return mx1, my1
 
 
+def detect_v7(background, puzzle):
+    """
+    v7: 双路径自适应 — v5 优先，仅当暗背景+CLAHE 置信度显著更高时切换。
+    策略：v5_orig (无 CLAHE, 7 组阈值) 与 adaptive_clahe (暗背景用 CLAHE) 并行，
+    v5 优先，仅当 adaptive 置信度显著更高 (>0.1) 时采用 adaptive 结果。
+    保持 geetest/tricky/tricky_hard 不退步，同时提升 balanced/caltech。
+    返回 (x, y)。
+    """
+    # Path 1: v5 (原始预处理, 7 组阈值)
+    bg_g1, pz_g1 = _preprocess(background, puzzle)
+    mx1, my1, mc1, nx1, ny1, nc1 = _detect_with_decision(bg_g1, pz_g1, CANNY_THRESHOLDS)
+
+    # Path 2: adaptive CLAHE (仅暗背景)
+    bg_gray_test = cv2.cvtColor(background, cv2.COLOR_BGR2GRAY)
+    mean_val = np.mean(bg_gray_test)
+    if mean_val < 120:
+        clip = CLAHE_CLIP_V6  # 8.0
+    elif mean_val < 160:
+        clip = 3.0
+    else:
+        clip = 0
+
+    if clip > 0:
+        bg_g2, pz_g2 = _preprocess_clahe(background, puzzle, clip=clip)
+        mx2, my2, mc2, _, _, _ = _detect_with_decision(bg_g2, pz_g2, CANNY_THRESHOLDS_V6)
+    else:
+        mx2, my2, mc2 = mx1, my1, mc1
+
+    # v5 优先，仅当 adaptive 显著更好时切换
+    if mc2 > mc1 + 0.1:
+        return mx2, my2
+    return mx1, my1
+
+
+def _detect_with_decision(bg_g, pz_g, thresholds):
+    """核心检测 + 决策，返回 (x, y, mc, nx, ny, nc)。"""
+    mx, my, mc = _multi_canny_match(bg_g, pz_g, thresholds=thresholds)
+    nx, ny, nc = _npc_match(bg_g, pz_g)
+
+    if mc >= CONFIDENCE_THRESHOLD or abs(mx - nx) <= AGREEMENT_TOLERANCE:
+        return mx, my, mc, nx, ny, nc
+    if nc > mc:
+        return nx, ny, nc, nx, ny, nc
+    return mx, my, mc, nx, ny, nc
+
+
 # --- 加速版 detect 函数 ---
 
 def detect_v5_mt(background, puzzle, canny_workers=7):
