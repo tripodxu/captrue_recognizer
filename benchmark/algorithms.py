@@ -298,34 +298,32 @@ def detect_v6b(background, puzzle):
 
 def detect_v7(background, puzzle):
     """
-    v7: 双路径自适应 — v5 优先，仅当暗背景+CLAHE 置信度显著更高时切换。
-    策略：v5_orig (无 CLAHE, 7 组阈值) 与 adaptive_clahe (暗背景用 CLAHE) 并行，
-    v5 优先，仅当 adaptive 置信度显著更高 (>0.1) 时采用 adaptive 结果。
-    保持 geetest/tricky/tricky_hard 不退步，同时提升 balanced/caltech。
+    v7: 双路径自适应 — v5 与 CLAHE 并行，取置信度更高者。
+    策略：v5_orig (无 CLAHE, 7 组阈值) 与 adaptive CLAHE 并行，
+    取置信度更高者的结果。
+    保持 geetest/tricky/tricky_hard 不退步，同时大幅提升 balanced/caltech。
+    调参结果：gap=0（有提升即采用）为全局最优。
     返回 (x, y)。
     """
     # Path 1: v5 (原始预处理, 7 组阈值)
     bg_g1, pz_g1 = _preprocess(background, puzzle)
-    mx1, my1, mc1, nx1, ny1, nc1 = _detect_with_decision(bg_g1, pz_g1, CANNY_THRESHOLDS)
+    mx1, my1, mc1, _, _, _ = _detect_with_decision(bg_g1, pz_g1, CANNY_THRESHOLDS)
 
-    # Path 2: adaptive CLAHE (仅暗背景)
+    # Path 2: adaptive CLAHE (根据亮度选择强度)
     bg_gray_test = cv2.cvtColor(background, cv2.COLOR_BGR2GRAY)
     mean_val = np.mean(bg_gray_test)
-    if mean_val < 120:
+    if mean_val < 150:
         clip = CLAHE_CLIP_V6  # 8.0
-    elif mean_val < 160:
-        clip = 3.0
+    elif mean_val < 180:
+        clip = 4.0
     else:
-        clip = 0
+        clip = 2.0  # 即使亮图也用温和 CLAHE
 
-    if clip > 0:
-        bg_g2, pz_g2 = _preprocess_clahe(background, puzzle, clip=clip)
-        mx2, my2, mc2, _, _, _ = _detect_with_decision(bg_g2, pz_g2, CANNY_THRESHOLDS_V6)
-    else:
-        mx2, my2, mc2 = mx1, my1, mc1
+    bg_g2, pz_g2 = _preprocess_clahe(background, puzzle, clip=clip)
+    mx2, my2, mc2, _, _, _ = _detect_with_decision(bg_g2, pz_g2, CANNY_THRESHOLDS_V6)
 
-    # v5 优先，仅当 adaptive 显著更好时切换
-    if mc2 > mc1 + 0.1:
+    # 取置信度更高者
+    if mc2 > mc1:
         return mx2, my2
     return mx1, my1
 
