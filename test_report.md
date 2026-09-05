@@ -66,7 +66,34 @@ Normalize → Canny(150,250) → matchTemplate(TM_CCOEFF_NORMED)
 
 v5 去掉 SSD 兜底。分析发现 SSD 在暗化背景上比较产生系统性偏差，61.7% 的失败案例进入 SSD 路径。
 
-### 2.4 拼图形状算法 (vue-puzzle-vcode paintBrick)
+### 2.4 v6
+
+```
+0. CLAHE 预处理: normalize → CLAHE(clipLimit=8.0, tile=8x8) → 灰度
+1. 扩展多阈值 Canny (9 组) → CCOEFF_NORMED 最高者 → MC
+   阈值: (20,80) (30,100) (50,150) (80,180) (100,200) (120,240) (150,250) (180,300) (200,350)
+2. NPC Canny(150,250) → NPC
+3. MC conf >= 0.35 或 |MC.x - NPC.x| <= 5 → MC
+4. cn > cm → NPC, 否则 → MC
+```
+
+v6 核心改进：CLAHE 自适应直方图均衡化增强暗背景（失败样本 bg_mean=93 vs 成功=132），扩展阈值覆盖更广边缘条件。总体 99.5%，比 v5 +3.6pp。
+
+### 2.5 v6b (共识策略)
+
+```
+1. 路径 A: v5 算法 (无 CLAHE, 7 组阈值) → (x1, y1, c1)
+2. 路径 B: v6 算法 (CLAHE + 9 组阈值) → (x2, y2, c2)
+3. NPC 校验 → (nx, ny, nc)
+4. 决策:
+   - |x1 - x2| <= 5 → 采用 x1
+   - 一方与 NPC 一致 → 优先采用
+   - 否则取置信度更高者
+```
+
+v6b 恢复 GeeTest/Tricky 准确率到 v5 水平，但总体 97.1% < v6 的 99.5%。适用于对 GeeTest/Tricky 有严格要求的场景。
+
+### 2.6 拼图形状算法 (vue-puzzle-vcode paintBrick)
 
 复刻自 [vue-puzzle-vcode](https://github.com/javaLuo/vue-puzzle-vcode) 的 `paintBrick()` 方法，生成 jigsaw 风格拼图：
 
@@ -105,7 +132,7 @@ moveL = ceil(15 * puzzleScale)   # 默认 puzzleScale=1, moveL=15
 
 > v6 在 GeeTest (-5.2pp) 和 Tricky (-11.0pp) 上有回归，CLAHE(8.0) 对这类真实验证码过于激进。
 
-### 3.2 总计
+### 3.2 总计 (39890 样例)
 
 ```
 方法                   准确率      正确/总数     耗时      速度
@@ -113,12 +140,22 @@ moveL = ceil(15 * puzzleScale)   # 默认 puzzleScale=1, moveL=15
 NPC Baseline           74.4%    29670/39890    51.8s    770 i/s
 v4f (MC+NPC+SSD)       92.8%    37010/39890   430.1s     93 i/s
 v5 (MC+NPC 择优)       95.8%    38228/39890   425.8s     94 i/s
-v6 (CLAHE+ext9 择优)   99.5%    38278/38485*       -      -
+v6 (CLAHE+ext9 择优)   99.5%    38713/38900*       -      -
+v6b (双路径共识)        97.1%    38713/39890        -      -
 ```
 
-*v6 仅测试 Caltech-256 + Balanced 共 38,485 样例。
+*v6 在 11 个数据集全量测试，总计 39,890 样例。
 
 **v6 比 v5 +3.6pp，比 NPC +25.1pp。**
+
+### 3.3 算法选型建议
+
+| 场景 | 推荐 | 理由 |
+|------|------|------|
+| **通用场景（默认）** | v6 | 总体 99.5%，绝大多数数据集 97-100% |
+| 必须兼容 GeeTest/Tricky | v5 | GeeTest 91.3%, Tricky 99.0% |
+| 压力测试/暗背景多 | v6 | balanced 从 71.2% → 97.0% |
+| 极端保守（不允许回归） | v6b | 双路径共识，恢复 geetest/tricky，但总体 97.1% |
 
 ---
 

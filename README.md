@@ -1,6 +1,6 @@
 # TncodeSolver
 
-通用 tncode 滑动验证码求解器。v5 算法在 39890 样例上达到 **95.8%** 准确率，配套反检测/人机行为模拟。
+通用 tncode 滑动验证码求解器。v6 算法在 39890 样例上达到 **99.5%** 准确率，配套反检测/人机行为模拟。
 
 ---
 
@@ -23,12 +23,13 @@ tncode_solver.py              核心求解器 (v5 算法 + 反检测)
 demo.py                       使用示例
 vcode_dataset_generator.py    数据集生成器 (复刻 vue-puzzle-vcode 的 paintBrick)
 test_report.md                完整测试报告
+9_4.md                        算法优化实验日志 (迭代记录)
 README.md                     本文件
 
 benchmark/
-  algorithms.py               共享算法模块 (NPC / v4f / v5 纯函数)
+  algorithms.py               共享算法模块 (NPC / v4f / v5 / v6 / v6b)
   npc_baseline.py             NPC Baseline (转发到 algorithms.py)
-  run_test.py                 统一测试脚本 (三模型对比)
+  run_test.py                 统一测试脚本 (多模型对比 + 多进程并行)
   experiment.py               A/B 实验对比
   test_v5.py                  v4f vs v5 对比
   extract_balanced.py         构建平衡测试集
@@ -53,34 +54,39 @@ tests/                        测试数据集 (39890 样例, 不入仓库)
 
 ## 算法
 
-### CV 检测 — 三版本对比
+### CV 检测 — 四版本对比
 
 | 版本 | 算法 | 总体准确率 |
 |------|------|-----------|
 | NPC Baseline | Canny(150,250) + matchTemplate | 74.4% |
 | v4f | 多阈值 Canny + NPC 校验 + SSD 兜底 | 92.8% |
-| **v5** | **多阈值 Canny + NPC 校验 + 置信度择优** | **95.8%** |
+| v5 | 多阈值 Canny + NPC 校验 + 置信度择优 | 95.8% |
+| **v6** | **CLAHE + 扩展9组阈值 + NPC 校验 + 置信度择优** | **99.5%** |
 
-### v5 算法流程
+### v6 算法流程
 
 ```
 输入: 背景图 (bg), 拼图切片 (mark)
 
-步骤 1 — 多阈值 Canny 模板匹配 (7 组)
-  阈值: (30,100) (50,150) (80,180) (100,200) (120,240) (150,250) (180,300)
+步骤 0 — CLAHE 预处理 (v6 新增)
+  归一化 → CLAHE(clipLimit=8.0, tile=8x8) → 灰度
+  增强局部对比度，解决暗背景检测失效问题
+
+步骤 1 — 扩展多阈值 Canny 模板匹配 (9 组)
+  阈值: (20,80) (30,100) (50,150) (80,180) (100,200) (120,240) (150,250) (180,300) (200,350)
   每组: Canny 边缘检测 → matchTemplate(TM_CCOEFF_NORMED)
   取 CCOEFF_NORMED 最高者 → (xm, ym, cm)
 
-步骤 2 — NPC 一致性校验
+步骤 2 — NPC 一致性校验 (同 v5)
   Canny(150,250) → matchTemplate → (xn, yn, cn)
   若 cm >= 0.35 或 |xm - xn| <= 5px → 返回 MC
 
-步骤 3 — 置信度择优
+步骤 3 — 置信度择优 (同 v5)
   cn > cm → 返回 NPC
   否则 → 返回 MC
 ```
 
-v5 核心改进：**去掉 SSD 兜底**。分析发现 SSD 在暗化背景上比较产生系统性偏差，61.7% 的失败案例进入 SSD 路径。去掉 SSD 后改用 NPC 置信度择优，准确率从 92.8% 提升到 95.8%。
+v6 核心改进：**CLAHE 自适应直方图均衡化** + **扩展阈值范围**。分析发现暗背景是主要失败原因（失败样本 bg_mean=93 vs 成功=132），CLAHE 完美解决此问题。
 
 ### 拼图形状算法
 
@@ -108,22 +114,22 @@ v5 核心改进：**去掉 SSD 兜底**。分析发现 SSD 在暗化背景上比
 
 ### 全量测试 (39890 样例)
 
-| 数据集 | 样例 | NPC | v4f | v5 | 来源 |
-|--------|------|-----|-----|-----|------|
-| GeeTest | 115 | 90.4% | 91.3% | 91.3% | [No-Puzzle-Captcha](https://github.com/isHarryh/No-Puzzle-Captcha) |
-| Tricky | 100 | 99.0% | 99.0% | 99.0% | [No-Puzzle-Captcha](https://github.com/isHarryh/No-Puzzle-Captcha) |
-| Tricky Hard | 190 | 90.5% | 98.9% | 98.4% | [No-Puzzle-Captcha](https://github.com/isHarryh/No-Puzzle-Captcha) |
-| Syn Easy | 200 | 96.5% | 98.0% | 100.0% | 自生成 |
-| Syn Medium | 200 | 75.5% | 97.0% | 99.5% | 自生成 |
-| Syn Hard | 200 | 45.5% | 87.0% | 100.0% | 自生成 |
-| Slider Easy | 200 | 91.5% | 96.5% | 99.0% | 自生成 |
-| Slider Hard | 200 | 42.0% | 99.0% | 100.0% | 自生成 |
-| Caltech-256 (30K) | 30607 | 76.9% | 96.1% | 97.7% | [Caltech-256](https://data.caltech.edu/records/nyg2z-78ja1) |
-| Caltech-256 (5K) | 5000 | 77.6% | 96.5% | 98.0% | [Caltech-256](https://data.caltech.edu/records/nyg2z-78ja1) |
-| Balanced 50/50 | 2878 | 41.0% | 49.9% | 71.2% | 压力测试集 |
-| **总计** | **39890** | **74.4%** | **92.8%** | **95.8%** | |
+| 数据集 | 样例 | NPC | v4f | v5 | v6 | 来源 |
+|--------|------|-----|-----|-----|-----|------|
+| GeeTest | 115 | 90.4% | 91.3% | 91.3% | 86.1% | [No-Puzzle-Captcha](https://github.com/isHarryh/No-Puzzle-Captcha) |
+| Tricky | 100 | 99.0% | 99.0% | 99.0% | 88.0% | [No-Puzzle-Captcha](https://github.com/isHarryh/No-Puzzle-Captcha) |
+| Tricky Hard | 190 | 90.5% | 98.9% | 98.4% | 97.9% | [No-Puzzle-Captcha](https://github.com/isHarryh/No-Puzzle-Captcha) |
+| Syn Easy | 200 | 96.5% | 98.0% | 100.0% | 100.0% | 自生成 |
+| Syn Medium | 200 | 75.5% | 97.0% | 99.5% | 100.0% | 自生成 |
+| Syn Hard | 200 | 45.5% | 87.0% | 100.0% | 100.0% | 自生成 |
+| Slider Easy | 200 | 91.5% | 96.5% | 99.0% | 100.0% | 自生成 |
+| Slider Hard | 200 | 42.0% | 99.0% | 100.0% | 100.0% | 自生成 |
+| Caltech-256 (30K) | 30607 | 76.9% | 96.1% | 97.7% | **99.7%** | [Caltech-256](https://data.caltech.edu/records/nyg2z-78ja1) |
+| Caltech-256 (5K) | 5000 | 77.6% | 96.5% | 98.0% | **99.7%** | [Caltech-256](https://data.caltech.edu/records/nyg2z-78ja1) |
+| Balanced 50/50 | 2878 | 41.0% | 49.9% | 71.2% | **97.0%** | 压力测试集 |
+| **总计** | **39890** | **74.4%** | **92.8%** | **95.8%** | **99.5%** | |
 
-> v5 比 NPC +21.4pp，比 v4f +3.0pp。
+> v6 比 v5 +3.6pp，比 NPC +25.1pp。v6 在 GeeTest/Tricky 上有小幅回归（-5/-11pp），但总体提升远大于回归。
 
 ### 合成数据集生成
 
@@ -147,6 +153,28 @@ v5 核心改进：**去掉 SSD 兜底**。分析发现 SSD 在暗化背景上比
 4. 在随机位置切割拼图切片 (BGRA, 非拼图区域填黑)
 5. 背景图在缺口位置暗化 (保留边缘结构)
 6. 记录缺口左上角坐标 (mask_x0, mask_y0)
+
+---
+
+## 算法选型建议
+
+| 场景 | 推荐算法 | 理由 |
+|------|---------|------|
+| **通用场景（默认）** | `detect_v6` | 总体 99.5%，绝大多数数据集 97-100% |
+| 必须兼容 GeeTest/Tricky | `detect_v5` | 在真实 GeeTest (91.3%) 和 Tricky (99.0%) 上最优 |
+| Caltech/合成数据为主 | `detect_v6` | Caltech 99.7%，合成 100%，比 v5 提升 +2pp |
+| 压力测试/暗背景多 | `detect_v6` | balanced_50_50 从 71.2% → 97.0% (+25.8pp) |
+| 极端保守（不允许任何回归） | `detect_v6b` | 双路径共识，geetest/tricky 恢复到 v5 水平，但总体 97.1% |
+
+### v6 vs v5 选型决策树
+
+```
+你的数据集是否包含大量 GeeTest/Tricky 真实验证码？
+├── 是 → 用 v5（91.3%/99.0% vs v6 的 86.1%/88.0%）
+└── 否 → 用 v6（总体 99.5% vs v5 的 95.8%）
+    └── 是否遇到暗背景/合成图片大量失败？
+        └── 是 → v6 的 CLAHE 预处理专门解决此问题
+```
 
 ---
 
