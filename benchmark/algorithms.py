@@ -258,6 +258,44 @@ def detect_v6(background, puzzle):
     return mx, my
 
 
+def detect_v6b(background, puzzle):
+    """
+    v6b: 双路径共识策略 — 同时运行 v5 (无CLAHE) 和 v6 (CLAHE+扩展阈值)。
+    1. 两路径结果一致 (差<=5px) → 直接采用
+    2. 一方与 NPC 一致 → 优先采用
+    3. 否则取置信度更高者
+    解决 v6 在 GeeTest/Tricky 上的回归，同时保留 Caltech/Balanced 提升。
+    返回 (x, y)。
+    """
+    # Path 1: v5 (原阈值, 无CLAHE)
+    bg_g1, pz_g1 = _preprocess(background, puzzle)
+    mx1, my1, mc1 = _multi_canny_match(bg_g1, pz_g1, thresholds=CANNY_THRESHOLDS)
+
+    # Path 2: v6 (CLAHE + 扩展阈值)
+    bg_g2, pz_g2 = _preprocess_clahe(background, puzzle)
+    mx2, my2, mc2 = _multi_canny_match(bg_g2, pz_g2, thresholds=CANNY_THRESHOLDS_V6)
+
+    # NPC (共享)
+    nx, ny, nc = _npc_match(bg_g1, pz_g1)
+
+    # 两路径一致 → 直接采用
+    if abs(mx1 - mx2) <= AGREEMENT_TOLERANCE:
+        return mx1, my1
+
+    # 一方与 NPC 一致 → 优先
+    v5_agrees = abs(mx1 - nx) <= AGREEMENT_TOLERANCE
+    v6_agrees = abs(mx2 - nx) <= AGREEMENT_TOLERANCE
+    if v5_agrees and not v6_agrees:
+        return mx1, my1
+    if v6_agrees and not v5_agrees:
+        return mx2, my2
+
+    # 否则取置信度更高者
+    if mc2 > mc1:
+        return mx2, my2
+    return mx1, my1
+
+
 # --- 加速版 detect 函数 ---
 
 def detect_v5_mt(background, puzzle, canny_workers=7):
